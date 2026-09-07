@@ -4,16 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "hermes-managed-desktops"
-version = "0.1.0"
+version = "0.2.0"
 description = "Experimental Linux/KVM work desktops with explicit guest targeting."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{name = "BearHuddleston, Hermes Agent"}]
-# Hermes with the unpublished generic profile-resource prerequisite must be
-# supplied separately. No released Hermes version is claimed to satisfy it.
-dependencies = []
+# Standalone management/recovery does not require a Hermes installation.
+dependencies = ["PyYAML>=6.0.3,<7", "psutil>=7.2.2,<8"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Operating System :: POSIX :: Linux",
@@ -26,6 +25,9 @@ classifiers = [
 Repository = "https://github.com/BearHuddleston/hermes-managed-desktops"
 Issues = "https://github.com/BearHuddleston/hermes-managed-desktops/issues"
 Documentation = "https://github.com/BearHuddleston/hermes-managed-desktops/blob/main/README.md"
+
+[project.scripts]
+hermes-managed-desktops = "managed_desktops.cli:main"
 
 [project.entry-points."hermes_agent.plugins"]
 managed-desktops = "managed_desktops"

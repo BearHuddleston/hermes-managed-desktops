@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Delegate to Hermes's hermetic per-file runner, never invoke pytest directly.
+# Delegate to stock Hermes's canonical hermetic per-file runner, not raw pytest.
+# CI pins the exact clean stock revision in scripts/verify_ci.py and package.yml.
+# HERMES_PYTHON is used only after the core runner probes its local/shared venvs.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ "$#" -lt 1 ]; then

@@ -27,8 +27,9 @@ def instance(tmp_path, monkeypatch):
     (tmp_path / "profile-a").mkdir()
     state.reserve("demo")
     data = {
-        "schema": 1, "id": str(uuid.uuid4()), "name": "demo", "cpus": 2,
+        "schema": 2, "id": str(uuid.uuid4()), "name": "demo", "cpus": 2,
         "owner_root": str(state.root().resolve()),
+        "binding": None,
         "memory_mib": 2048, "disk_gib": 16, "ssh_port": 22888,
         "network": "isolated", "phase": "ready",
     }
@@ -36,17 +37,15 @@ def instance(tmp_path, monkeypatch):
     return data
 
 
-def test_profile_state_cannot_select_other_profile_or_escape(instance, monkeypatch, tmp_path):
+def test_vm_paths_cannot_escape_or_follow_symlinks(instance):
     assert state.load("demo") == instance
     original = state.vm_dir("demo")
     for name in ("../demo", "/tmp/demo", "Demo", "a/b", "a\n", "-x"):
         with pytest.raises(state.VMError):
             state.vm_dir(name)
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "profile-b"))
-    with pytest.raises(state.VMError, match="not found"):
-        state.load("demo")
-    state.vm_dir("demo").parent.mkdir(parents=True)
-    state.vm_dir("demo").symlink_to(original)
+    moved = original.with_name("moved")
+    original.rename(moved)
+    original.symlink_to(moved)
     with pytest.raises(state.VMError, match="symlink"):
         state.load("demo")
 
@@ -170,18 +169,11 @@ def test_upload_does_not_clobber_files_symlinks_or_directories(instance, monkeyp
     assert not tuple(tmp_path.glob(".hermes-upload-*"))
 
 
-def test_profile_cloning_neither_copies_nor_reuses_vm_ownership(instance, monkeypatch, tmp_path):
-    from hermes_cli.profiles import create_profile
-    from hermes_constants import get_hermes_home
-
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    source_home = get_hermes_home()
-    relative = state.root().relative_to(source_home)
-    clone = create_profile("cloned", clone_all=True, no_alias=True)
-    assert not (clone / relative).exists()
-    # A manual copy must fail too, rather than targeting the source unit/socket.
-    shutil.copytree(state.root(), clone / relative)
-    monkeypatch.setenv("HERMES_HOME", str(clone))
+def test_copied_store_cannot_reuse_original_vm_identity(instance, monkeypatch, tmp_path):
+    source = state.root()
+    new_base = tmp_path / "copied-store"
+    shutil.copytree(source, new_base / source.name)
+    monkeypatch.setenv("XDG_STATE_HOME", str(new_base))
     with pytest.raises(state.VMError, match="owner"):
         state.load("demo")
 
@@ -283,7 +275,7 @@ def test_ready_marker_does_not_hide_cloud_init_errors(instance, monkeypatch):
 
 
 @pytest.mark.parametrize("operation", ["delete", "rename"])
-def test_profile_mutation_cannot_orphan_guest_disks(monkeypatch, tmp_path, operation):
+def test_profile_mutation_preserves_external_guest_disks(monkeypatch, tmp_path, operation):
     from hermes_cli import profiles
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -292,19 +284,15 @@ def test_profile_mutation_cannot_orphan_guest_disks(monkeypatch, tmp_path, opera
     monkeypatch.setenv("HERMES_HOME", str(profile))
     disk = state.reserve("guest") / "disk.qcow2"
     disk.write_bytes(b"disk fixture")
-    # Discovery is read-only; assert the destructive boundary rather than the
-    # order of a read-only probe relative to the refusal.
+    # No real services belong to this disposable profile.
     monkeypatch.setattr(profiles, "_check_gateway_running", lambda *_: False)
-    cleanup = Mock(side_effect=AssertionError("Must refuse before changing profile processes"))
-    monkeypatch.setattr(profiles, "_cleanup_gateway_service", cleanup)
-    monkeypatch.setattr(profiles, "_stop_profile_backends", cleanup)
-    with pytest.raises(ValueError, match="resource"):
-        if operation == "delete":
-            profiles.delete_profile("vm-owner", yes=True)
-        else:
-            profiles.rename_profile("vm-owner", "other")
+    monkeypatch.setattr(profiles, "_cleanup_gateway_service", lambda *_: None)
+    monkeypatch.setattr(profiles, "_stop_profile_backends", lambda *_: None)
+    if operation == "delete":
+        profiles.delete_profile("vm-owner", yes=True)
+    else:
+        profiles.rename_profile("vm-owner", "other")
     assert disk.read_bytes() == b"disk fixture"
-    cleanup.assert_not_called()
 
 
 def test_named_profile_export_omits_vm_keys_seed_and_disks(monkeypatch, tmp_path):
@@ -314,12 +302,11 @@ def test_named_profile_export_omits_vm_keys_seed_and_disks(monkeypatch, tmp_path
     profile = profiles.get_profile_dir("vm-owner")
     profile.mkdir(parents=True)
     monkeypatch.setenv("HERMES_HOME", str(profile))
-    resource = state.reserve("demo").relative_to(profile)
-    runtime = state.root().relative_to(profile)
-    for relative in (resource / "secrets/identity", resource / "seed.iso",
-                     resource / "disk.qcow2", runtime / ".images/base.qcow2",
-                     "workspace/desktop-vms/notes.txt", "SOUL.md"):
-        path = profile / relative
+    resource = state.reserve("demo")
+    runtime = state.root()
+    for path in (resource / "secrets/identity", resource / "seed.iso",
+                 resource / "disk.qcow2", runtime / ".images/base.qcow2",
+                 profile / "workspace/desktop-vms/notes.txt", profile / "SOUL.md"):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("inert export fixture", encoding="utf-8")
     archive = profiles.export_profile("vm-owner", str(tmp_path / "shared.tar.gz"))
@@ -327,7 +314,8 @@ def test_named_profile_export_omits_vm_keys_seed_and_disks(monkeypatch, tmp_path
         names = stream.getnames()
     assert "vm-owner/SOUL.md" in names
     assert "vm-owner/workspace/desktop-vms/notes.txt" in names
-    assert not any(name == f"vm-owner/{runtime}" or name.startswith(f"vm-owner/{runtime}/") for name in names)
+    assert not any(Path(name).name in {"identity", "seed.iso", "disk.qcow2", "base.qcow2"} for name in names)
+    assert (resource / "secrets/identity").is_file()
 
 
 def test_live_readiness_recovers_after_an_individual_daemon_restart(instance, monkeypatch):
@@ -343,21 +331,21 @@ def test_live_readiness_recovers_after_an_individual_daemon_restart(instance, mo
     assert guest.readiness(instance)["ready"]
 
 
-def test_profile_mutation_guard_allows_cache_only_state(tmp_path, monkeypatch):
+def test_profile_rename_does_not_move_independent_cache(tmp_path, monkeypatch):
     from hermes_cli import profiles
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     profile = profiles.get_profile_dir("cache-owner")
     monkeypatch.setenv("HERMES_HOME", str(profile))
-    relative = state.root().relative_to(profile)
-    cache = profile / relative / ".images"
+    profile.mkdir(parents=True)
+    cache = state.root() / ".images"
     cache.mkdir(parents=True)
     (cache / "base.qcow2").write_bytes(b"inert cached image fixture")
     profiles.rename_profile("cache-owner", "renamed-cache")
-    assert (profiles.get_profile_dir("renamed-cache") / relative / ".images/base.qcow2").read_bytes() == b"inert cached image fixture"
+    assert (cache / "base.qcow2").read_bytes() == b"inert cached image fixture"
 
 
-def test_creation_reserves_profile_before_fetching_or_starting(tmp_path, monkeypatch):
+def test_creation_publishes_recoverable_state_before_external_work(tmp_path, monkeypatch):
     from hermes_cli import profiles
 
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
@@ -370,29 +358,67 @@ def test_creation_reserves_profile_before_fetching_or_starting(tmp_path, monkeyp
 
     def download():
         assert state.load("demo")["phase"] == "preparing"
-        with pytest.raises(ValueError, match="resource"):
-            profiles.delete_profile("vm-owner", yes=True)
-        with pytest.raises(ValueError, match="resource"):
-            profiles.rename_profile("vm-owner", "moved")
+        shutil.rmtree(profile)
         raise state.VMError("fixture download failure")
 
     monkeypatch.setattr(vm, "download_image", download)
-    with pytest.raises(state.VMError, match="fixture download failure"):
-        vm.create("demo", network="nat")
+    with state.profile_scope(profile):
+        with pytest.raises(state.VMError, match="fixture download failure"):
+            vm.create("demo", network="nat")
     run.assert_not_called()
     assert state.load("demo")["phase"] == "failed"
+    assert state.binding_status(state.load("demo"))["status"] == "stale"
     monkeypatch.setattr(vm, "unit_active", lambda _: False)
     monkeypatch.setattr(vm, "runtime_dir", lambda _: tmp_path / "runtime")
     vm.remove("demo", "demo")
     assert not state.vm_dir("demo").exists()
 
 
-def test_missing_core_prerequisite_refuses_without_creating_state(monkeypatch, isolated_profile):
+def test_missing_core_resource_api_is_irrelevant(monkeypatch, isolated_profile):
     before = set(isolated_profile.iterdir())
     monkeypatch.setitem(sys.modules, "hermes_cli.profile_resources", None)
-    with pytest.raises(state.VMError, match="profile-resource"):
-        vm.list_vms()
+    assert vm.list_vms() == []
     assert set(isolated_profile.iterdir()) == before
+
+
+def test_rebinding_during_io_cannot_report_success(instance, monkeypatch):
+    monkeypatch.setattr(vm, "unit_active", lambda _: False)
+
+    def transport(*_args, **_kwargs):
+        vm.unbind_vm("demo", instance["id"])
+        return subprocess.CompletedProcess([], 0, "old operation", "")
+
+    monkeypatch.setattr(guest, "ssh", transport)
+    with pytest.raises(state.VMError, match="rebound"):
+        guest.execute("demo", ["true"])
+
+
+def test_capture_keeps_original_target_across_its_steps(instance, monkeypatch, tmp_path):
+    seen = []
+
+    def transport(snapshot, *_args, **_kwargs):
+        seen.append(snapshot["id"])
+        replacement = {**instance, "id": str(uuid.uuid4())}
+        state.save("demo", replacement)
+        return subprocess.CompletedProcess([], 0, "{}", "")
+
+    monkeypatch.setattr(guest, "ssh", transport)
+    transfer = Mock(side_effect=AssertionError("Do not download from replacement"))
+    monkeypatch.setattr(guest, "transfer", transfer)
+    with pytest.raises(state.VMError, match="replaced"):
+        guest.capture("demo", 1, str(tmp_path / "shot.png"))
+    assert seen and set(seen) == {instance["id"]}
+    transfer.assert_not_called()
+
+
+def test_metadata_identity_is_synced_before_external_provisioning(instance, monkeypatch):
+    import os
+
+    synced = []
+    monkeypatch.setattr(state.os, "fsync", lambda fd: synced.append(Path(os.readlink(f"/proc/self/fd/{fd}"))))
+    state.save("demo", instance)
+    path = state.vm_dir("demo")
+    assert synced == [path / "instance.json.tmp", path, path.parent, path.parent.parent]
 
 
 @pytest.mark.parametrize("leftover", [None, "instance.json.tmp", "disk.qcow2"])

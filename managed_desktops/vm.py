@@ -1,4 +1,4 @@
-"""QEMU/KVM lifecycle. Only profile-owned systemd units are controlled."""
+"""QEMU/KVM lifecycle owned independently of Hermes profiles."""
 
 from __future__ import annotations
 
@@ -13,7 +13,8 @@ import uuid
 
 from .config import settings
 from .state import (
-    IMAGE_SHA512, IMAGE_URL, VMError, download_image, load, lock, private_dir,
+    IMAGE_SHA512, IMAGE_URL, BindingError, VMError, assert_profile, binding_status,
+    check_access, current_profile, download_image, load, lock, private_dir, profile_identity,
     require_linux, reserve, root, run, save, validate_name, vm_dir, write_private,
 )
 
@@ -30,7 +31,7 @@ def firmware(config):
 def preflight():
     require_linux()
     config = settings()
-    binaries = ["qemu-system-x86_64", "qemu-img", "cloud-localds", "ssh", "ssh-keygen", "scp", "systemd-run", "systemctl"]
+    binaries = ["qemu-system-x86_64", "qemu-img", "cloud-localds", "ssh", "ssh-keygen", "scp", "systemd-run", "systemctl", "stat"]
     checks = {name: bool(shutil.which(name, path=os.defpath)) for name in binaries}
     checks["x86_64"] = platform.machine() in ("x86_64", "amd64")
     checks["kvm"] = os.access("/dev/kvm", os.R_OK | os.W_OK)
@@ -97,6 +98,7 @@ def qmp(state, command="query-status"):
 
 
 def require_running(state):
+    check_access(state)
     if not unit_active(state):
         raise VMError(f"VM {state['name']!r} is stopped. Start it explicitly; no host fallback.")
     if not qmp(state).get("running"):
@@ -106,7 +108,8 @@ def require_running(state):
 def status(name):
     state = load(name)
     active = unit_active(state)
-    result = {**state, "unit": unit(state), "active": active, "state_directory": str(vm_dir(name))}
+    result = {**state, "unit": unit(state), "active": active, "state_directory": str(vm_dir(name)),
+              "binding_status": binding_status(state)}
     if active:
         try:
             result["qemu"] = qmp(state)
@@ -118,6 +121,7 @@ def status(name):
 
 
 def list_vms():
+    assert_profile()
     directory = root() / "resources"
     if directory.is_symlink():
         raise VMError("Refusing symlink VM resources directory.")
@@ -125,12 +129,23 @@ def list_vms():
         return []
     entries = []
     for path in sorted(directory.iterdir()):
+        try:
+            validate_name(path.name)
+        except VMError as exc:
+            if current_profile() is None:
+                entries.append({"name": path.name, "phase": "incomplete", "active": None,
+                                "error": str(exc), "removable_unprovisioned": False})
+            continue
         if not path.is_dir():
             continue
         with lock(path.name):
             try:
                 entries.append(status(path.name))
+            except BindingError:
+                continue  # Never expose another profile's VM or fall back to global.
             except VMError as exc:
+                if current_profile() is not None:
+                    continue  # Unknown ownership can only be inspected by --global.
                 entries.append({
                     "name": path.name, "phase": "incomplete", "active": None,
                     "error": str(exc), "removable_unprovisioned": _unprovisioned(path),
@@ -174,6 +189,7 @@ def qemu_argv(state):
 
 
 def _start(state):
+    check_access(state)
     if unit_active(state):
         require_running(state)
         return
@@ -226,8 +242,10 @@ def create(name, *, cpus=None, memory_mib=None, disk_gib=None, network, permissi
         raise VMError("Preflight failed: " + json.dumps(report))
     config = settings()
     state = {
-        "schema": 1, "id": str(uuid.uuid4()), "name": name,
+        "schema": 2, "id": str(uuid.uuid4()), "name": name,
         "owner_root": str(root().resolve()),
+        "binding": assert_profile(),
+        "binding_revision": 0,
         "cpus": cpus if cpus is not None else config.get("cpus", 4),
         "memory_mib": memory_mib if memory_mib is not None else config.get("memory_mib", 4096),
         "disk_gib": disk_gib if disk_gib is not None else config.get("disk_gib", 32),
@@ -298,6 +316,8 @@ def remove(name, confirm):
     with lock(name):
         path = vm_dir(name)
         if _unprovisioned(path):
+            if current_profile() is not None:
+                raise BindingError("Incomplete ownership requires the standalone --global CLI for recovery.")
             shutil.rmtree(path)
             return {"removed": name, "unprovisioned": True, "image_cache_retained": True}
         state = load(name)
@@ -308,3 +328,26 @@ def remove(name, confirm):
         if runtime.exists():
             shutil.rmtree(runtime)
     return {"removed": name, "image_cache_retained": True}
+
+
+def _set_binding(name, home, confirm):
+    if current_profile() is not None:
+        raise BindingError("Binding changes require explicit standalone --global operator scope.")
+    with lock(name):
+        state = load(name)
+        if confirm != state["id"]:
+            raise VMError("Binding changes require --confirm with the exact current VM UUID.")
+        if unit_active(state):
+            raise VMError("Stop the VM before changing its profile binding.")
+        state["binding"] = profile_identity(home) if home is not None else None
+        state["binding_revision"] = state.get("binding_revision", 0) + 1
+        save(name, state)
+    return {"name": name, "id": state["id"], "binding_status": binding_status(state)}
+
+
+def bind_vm(name, profile_home, confirm):
+    return _set_binding(name, profile_home, confirm)
+
+
+def unbind_vm(name, confirm):
+    return _set_binding(name, None, confirm)

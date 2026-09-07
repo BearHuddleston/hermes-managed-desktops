@@ -27,7 +27,7 @@ def test_empty_profile_inventory_and_missing_target_fail_closed():
 
 @pytest.mark.parametrize("args", [
     ("create", "demo"),  # Provisioning egress must be explicitly accepted.
-    ("cua", "demo", "call", "list_windows", "{}"),  # No implicit screen.
+    ("capture", "demo"),  # No implicit screen.
     ("remove", "demo"),  # No implicit destructive confirmation.
 ])
 def test_unsafe_implicit_defaults_are_rejected(args):
@@ -37,11 +37,9 @@ def test_unsafe_implicit_defaults_are_rejected(args):
 
 
 def test_documented_screen_targeting_reaches_the_guest_parser():
-    import argparse
-    from managed_desktops.cli import setup_parser
+    from managed_desktops.cli import standalone_parser
 
-    parser = argparse.ArgumentParser()
-    setup_parser(parser.add_subparsers().add_parser("desktop-vm"))
+    parser = standalone_parser()
     cases = (
         ("app", "--screen", "2", "demo", "--", "mousepad", "--disable-server"),
         ("exec", "--screen", "2", "demo", "--", "printenv", "DISPLAY"),
@@ -50,7 +48,7 @@ def test_documented_screen_targeting_reaches_the_guest_parser():
         ("capture", "demo", "--screen", "2", "--pid", "123", "--window-id", "456"),
     )
     for command in cases:
-        parsed = parser.parse_args(["desktop-vm", *command])
+        parsed = parser.parse_args(["--global", *command])
         assert parsed.name == "demo"
         assert parsed.screen == 2
         assert parsed.vm_action == command[0]
@@ -113,3 +111,26 @@ def test_uncommitted_staging_helper_and_cli_enable(tmp_path, monkeypatch):
     assert help_result.returncode == 0, help_result.stderr
     assert "preflight" in help_result.stdout
     assert not (home / "managed-resources").exists()
+
+
+@pytest.mark.parametrize("action", ["exec", "app", "cua"])
+def test_native_arbitrary_argv_is_rejected_with_standalone_guidance(action, monkeypatch, capsys):
+    import argparse
+    import importlib
+    from hermes_cli.plugins import get_plugin_manager
+    from hermes_cli.main import _attach_plugin_cli_command
+
+    manager = get_plugin_manager()
+    manager.discover_and_load()
+    module = manager._plugins["managed-desktops"].module
+    io = importlib.import_module(module.__name__ + ".managed_desktops.io")
+    monkeypatch.setattr(io, "execute", lambda *_a, **_kw: pytest.fail("native guest execution"))
+    parser = argparse.ArgumentParser()
+    _attach_plugin_cli_command(parser.add_subparsers(), manager._cli_commands["desktop-vm"])
+    args = parser.parse_args(["desktop-vm", action, "demo", "--", "python3", "-c", "print(1)", "-r", "literal"])
+    assert args.func(args) == 2
+    assert "hermes-managed-desktops --profile-home" in capsys.readouterr().err
+    # Full stock CLI path also refuses, rather than advertising unsafe forwarding.
+    result = invoke(action, "demo")
+    assert result.returncode == 2
+    assert "hermes-managed-desktops --profile-home" in result.stderr

@@ -11,14 +11,21 @@ def register(ctx):
 
     def dispatch(args):
         from .cli import _dispatch
+        from .state import VMError
 
-        with bind(home, ctx.get_config):
-            return _dispatch(args)
+        try:
+            with bind(home, ctx.get_config):
+                return _dispatch(args)
+        except (VMError, OSError, ValueError) as exc:
+            import sys
+
+            print(f"desktop-vm: {exc}", file=sys.stderr)
+            return 1
 
     def setup(parser):
         from .cli import setup_parser
 
-        setup_parser(parser)
+        setup_parser(parser, native=True)
         # setup_parser supports direct use and sets its own handler. Restore
         # the bound handler even for callers which attach defaults before setup.
         parser.set_defaults(func=dispatch)

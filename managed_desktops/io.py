@@ -15,7 +15,7 @@ import time
 
 from .config import settings
 from .vm import preflight, require_running, status
-from .state import VMError, host_env, load, lock, run, save, vm_dir
+from .state import VMError, host_env, instance_stamp, load, lock, run, save, vm_dir
 
 
 GUEST_INSTALLED = "/var/lib/hermes-desktop-vm/installed"
@@ -49,6 +49,9 @@ def ssh_options(state):
 
 
 def ssh(state, argv, *, timeout=30, check=True):
+    with lock(state["name"]):
+        if instance_stamp(load(state["name"])) != instance_stamp(state):
+            raise VMError("VM was replaced or rebound before SSH; refusing the new target.")
     require_running(state)
     if not argv:
         raise VMError("A guest command is required.")
@@ -59,15 +62,17 @@ def ssh(state, argv, *, timeout=30, check=True):
 
 
 @contextmanager
-def _guest_operation(name):
+def _guest_operation(name, *, expected=None):
     with lock(name):
         state = load(name)
+        if expected is not None and instance_stamp(state) != instance_stamp(expected):
+            raise VMError("VM was replaced or rebound between guest operations; refusing the new target.")
     # SSH/SCP may block until their timeout. Keep lifecycle control available,
     # but never report success for a different instance that reused this name.
     yield state
     with lock(name):
-        if load(name)["id"] != state["id"]:
-            raise VMError("VM was replaced during guest I/O; refusing the new target.")
+        if instance_stamp(load(name)) != instance_stamp(state):
+            raise VMError("VM was replaced or rebound during guest I/O; refusing the new target.")
 
 
 def execute(name, argv, screen=None, timeout=60):
@@ -95,28 +100,38 @@ def record(name, screen, action, recording=None):
 
 
 def capture(name, screen, output=None, pid=None, window_id=None):
+    with _guest_operation(name) as state:
+        return _capture(state, screen, output, pid, window_id)
+
+
+def _capture(state, screen, output, pid, window_id):
     import uuid
     from .state import private_dir, write_private
 
+    name = state["name"]
     screen_number(screen)
     if (pid is None) != (window_id is None):
         raise VMError("Window capture requires both --pid and --window-id.")
     filename = f"screen-{screen}-{uuid.uuid4()}.png"
     remote = "/home/agent/workspace/" + filename
     session = f"hermes-vm-screen-{screen}"
-    cua(name, screen, "call", ["start_session", json.dumps({"session": session})])
+    prefix = ["/usr/local/bin/hermes-vm-cua", screen_number(screen), "call"]
+    ssh(state, [*prefix, "start_session", json.dumps({"session": session})], timeout=90)
     data: dict = {"session": session, "screenshot_out_file": remote}
     tool = "get_desktop_state"
     if pid is not None:
         data.update(pid=pid, window_id=window_id, max_elements=500)
         tool = "get_window_state"
-    result = cua(name, screen, "call", [tool, json.dumps(data)])
+    result = ssh(state, [*prefix, tool, json.dumps(data)], timeout=90)
     snapshot = json.loads(result.stdout)
-    artifacts = private_dir(vm_dir(name) / "artifacts")
-    receipt = artifacts / (filename + ".json")
-    write_private(receipt, json.dumps(snapshot, indent=2))
+    with lock(name):
+        if instance_stamp(load(name)) != instance_stamp(state):
+            raise VMError("VM was replaced or rebound during capture; refusing the new target.")
+        artifacts = private_dir(vm_dir(name) / "artifacts")
+        receipt = artifacts / (filename + ".json")
+        write_private(receipt, json.dumps(snapshot, indent=2))
     destination = str(output or (artifacts / filename))
-    transfer(name, remote, destination, upload=False)
+    transfer(name, remote, destination, upload=False, _expected=state)
     return {"name": name, "screen": screen, "image": destination, "snapshot": str(receipt), "session": session}
 
 
@@ -169,8 +184,8 @@ def wait(name, timeout=None):
         if result["ready"]:
             with lock(name):
                 current = load(name)
-                if current["id"] != state["id"]:
-                    raise VMError("VM was replaced while waiting; refusing the new target.")
+                if instance_stamp(current) != instance_stamp(state):
+                    raise VMError("VM was replaced or rebound while waiting; refusing the new target.")
                 require_running(current)
                 state = current
                 if state["phase"] != "ready":
@@ -210,8 +225,8 @@ def guest_path(value):
     return str(path)
 
 
-def transfer(name, source, destination, *, upload):
-    with _guest_operation(name) as state:
+def transfer(name, source, destination, *, upload, _expected=None):
+    with _guest_operation(name, expected=_expected) as state:
         require_running(state)
         argv = ["scp", *ssh_options(state), "-o", "ClearAllForwardings=yes", "-B", "-P", str(state["ssh_port"])]
         if upload:
