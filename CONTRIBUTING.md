@@ -89,9 +89,11 @@ units. Fresh-VM acceptance is separate and requires authorized disposable resour
 
 Build sdist and wheel from sdist in a disposable venv using
 `python -m build --outdir /absolute/path/to/disposable-dist`. Do not install into
-the running Hermes environment. 0.2.0 is local and unreleased; public `main` still
-has 0.1.0 and there is no PyPI release. Use a local source install or built wheel,
-not a remote-main command presented as installing this code.
+the running Hermes environment. The 0.2.0 source preview is published on
+`feat/independent-vm-lifecycle`; it is not a PyPI or GitHub release. Follow the
+[README installation steps](README.md#install-the-source-preview), record the
+source commit, and verify the built wheel rather than assuming an unqualified
+remote install selects this version.
 
 Run the CI helper **before installing the wheel** to verify directory discovery:
 
@@ -133,10 +135,12 @@ No autochat binding or tablet viewer is part of this package.
 
 `.github/workflows/package.yml` builds distributions and runs the canonical suite,
 directory/wheel discovery and Hermes-free standalone verification on Python
-3.11–3.13 against the exact stock SHA. Actions are SHA-pinned, repository permissions
-are read-only, and no package publishing/release credentials are used. It starts no
-VMs and does not replace fresh-VM acceptance. Report actual local results and pending
-remote CI honestly; merely writing the workflow is not a remote pass.
+3.11–3.13 against the exact stock SHA. Triggers are pull requests, pushes to `main`,
+and manual dispatch; feature-branch pushes alone do not start a run. Actions are
+SHA-pinned, repository permissions are read-only, and no package publishing/release
+credentials are used. It starts no VMs and does not replace fresh-VM acceptance.
+Report actual local results and exact-head remote CI honestly; merely writing the
+workflow is not a remote pass.
 
 Keep `plugin.yaml` and `pyproject.toml` package versions aligned and supported Python
 versions explicit. Publish tags, releases or registry packages only as a separately

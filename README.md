@@ -7,9 +7,10 @@ explicitly loaded, read-only skill `managed-desktops:managed-agent-desktops`.
 It adds no model tool, patches no core files, and never retargets normal
 `computer_use`, binds autochat, or provides a tablet viewer.
 
-> **0.2.0 is an unreleased local-source preview, not a PyPI release.** The public
-> `main` still contains 0.1.0; a remote Git/pip install of `main` does not install
-> this independent lifecycle. Use the local 0.2.0 checkout or a wheel built from it.
+> **0.2.0 is a published source preview, not a PyPI or GitHub release.** Use
+> [`feat/independent-vm-lifecycle`](https://github.com/BearHuddleston/hermes-managed-desktops/tree/feat/independent-vm-lifecycle)
+> for this version, rather than assuming an unqualified install gets it. The older
+> 0.1.0 implementation requires core prerequisites and has a different storage contract.
 
 Source and issues: [BearHuddleston/hermes-managed-desktops](https://github.com/BearHuddleston/hermes-managed-desktops).
 
@@ -33,29 +34,39 @@ Native management, capture, transfers, recording and loopback viewing are suppor
 See the official [plugin contract](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins)
 and [profile guide](https://hermes-agent.nousresearch.com/docs/user-guide/profiles).
 
-## Install from local source
+## Install the source preview
 
-Use a disposable venv for development, not the running agent's environment. Choose
-absolute paths; these examples do not install or update Hermes:
+Clone the published branch into a new directory and build a wheel. Use a separate
+venv outside Hermes profiles, not the running agent's environment, so standalone
+recovery survives profile deletion. These examples do not install or update Hermes
+or start a guest. Python 3.11 must already be available; 3.12 or 3.13 can be used
+instead. Do not use an unsupported system Python just because it is named `python3`.
 
 ```bash
-PLUGIN=/absolute/path/to/local-0.2.0-checkout
+PLUGIN=/absolute/path/to/new-managed-desktops-checkout
 SANDBOX=/absolute/path/to/new-disposable-artifacts
-python3 -m venv "$SANDBOX/venv"
+git clone --branch feat/independent-vm-lifecycle --single-branch \
+  https://github.com/BearHuddleston/hermes-managed-desktops.git "$PLUGIN"
+git -C "$PLUGIN" log -1 --format='%H'
+python3.11 -m venv "$SANDBOX/venv"
 PY="$SANDBOX/venv/bin/python"
 "$PY" -m pip install 'build==1.2.2.post1'
 "$PY" -m build "$PLUGIN" --outdir "$SANDBOX/dist"
 "$PY" -m pip install "$SANDBOX/dist/hermes_managed_desktops-0.2.0-py3-none-any.whl"
-"$SANDBOX/venv/bin/hermes-managed-desktops" --help
+export PATH="$SANDBOX/venv/bin:$PATH"
+hermes-managed-desktops --help
 ```
 
-The build produces an sdist and a wheel from that sdist. Installing the wheel
+The branch can advance; record the printed commit alongside verification results.
+If you already have this version checked out, set `PLUGIN` to that directory and
+skip cloning rather than replacing existing work. The build produces an sdist and
+a wheel from that sdist. Installing the wheel
 resolves its declared dependencies. Do not use `--no-deps` unless they are already
 installed. An editable install, `"$PY" -m pip install -e "$PLUGIN"`, is also a
 local-source option. The wheel includes guest assets, the single bundled skill,
 the standalone console script and the `hermes_agent.plugins` module entry point.
 
-For optional native integration, install that local wheel into the intended
+For optional native integration, install the built wheel into the intended
 Hermes interpreter, then enable it in the explicitly selected profile:
 
 ```bash
@@ -200,8 +211,11 @@ HERMES_PYTHON=/absolute/path/to/test-venv/bin/python \
   scripts/run_tests.sh /absolute/path/to/stock-hermes-checkout --file-retries 0 -q
 ```
 
-CI builds distributions, runs this suite and verifies directory/wheel discovery
-and Hermes-free standalone use on Python 3.11–3.13 against the exact stock SHA
-above. SHA-pinned actions have read-only repository permissions; no release or
-registry publishing is configured. CI does **not** start KVM guests or establish
-fresh-VM acceptance. That requires separately authorized disposable resources.
+The CI workflow builds distributions, runs this suite and verifies directory/wheel
+discovery and Hermes-free standalone use on Python 3.11–3.13 against the exact stock
+SHA above. It runs on pull requests, pushes to `main`, or manual dispatch; a feature
+branch push alone does not trigger it. Check the run for the relevant commit rather
+than treating the workflow definition as a passing result. SHA-pinned actions have
+read-only repository permissions; no release or registry publishing is configured.
+CI does **not** start KVM guests or establish fresh-VM acceptance. That requires
+separately authorized disposable resources.

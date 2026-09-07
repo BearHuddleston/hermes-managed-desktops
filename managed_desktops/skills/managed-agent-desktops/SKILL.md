@@ -32,8 +32,10 @@ changing host settings. Profile binding needs stable directory birth time and a 
 `stat`; unsupported filesystems fail closed. Do not change scope to evade this refusal.
 
 Use the installed `hermes-managed-desktops` CLI or `python -m managed_desktops`, both
-independent of Hermes. The 0.2.0 package is a local-source preview, not a PyPI release;
-remote `main` still has 0.1.0. See the repository README for local wheel/source installation.
+independent of Hermes. The 0.2.0 source preview is published on
+`feat/independent-vm-lifecycle`, not as a PyPI or GitHub release. Follow the repository
+README to clone that branch and build a wheel; do not assume an unqualified install
+selects 0.2.0. Use Python 3.11–3.13 and keep standalone recovery outside profiles.
 For a directory-only copy, run the module from `<profile home>/plugins/managed-desktops/`
 or set `PYTHONPATH` to that containing directory. Copying does not install a console script.
 

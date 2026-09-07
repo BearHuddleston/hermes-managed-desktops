@@ -4,7 +4,8 @@ Use named Debian VMs for native-app work without operating the host desktop.
 The provisioner supports Linux x86_64/KVM and a user systemd session. The
 standalone CLI works without Hermes; optional `hermes desktop-vm` integration
 uses stock native plugin APIs. No core patch or new model tool is required.
-See [local 0.2.0 installation](../README.md); this is not a PyPI release.
+See [0.2.0 source-preview installation](../README.md#install-the-source-preview)
+for the published branch and wheel build. No PyPI or GitHub release is required.
 
 ## Choose scope before acting
 
