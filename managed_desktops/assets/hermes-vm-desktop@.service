@@ -1,0 +1,23 @@
+[Unit]
+Description=Hermes managed desktop screen %i
+After=network.target
+Wants=hermes-vm-cua@%i.service hermes-vm-view@%i.service
+
+[Service]
+Type=notify
+NotifyAccess=all
+User=agent
+Group=agent
+Environment=HOME=/home/agent
+RuntimeDirectory=hermes-vm-desktop-%i
+RuntimeDirectoryMode=0700
+UMask=0077
+ExecStart=/usr/local/lib/hermes-desktop-vm/desktop-launch %i
+Restart=on-failure
+RestartSec=3
+KillMode=control-group
+TimeoutStartSec=60
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

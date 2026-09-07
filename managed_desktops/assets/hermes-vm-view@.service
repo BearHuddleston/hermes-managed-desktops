@@ -1,0 +1,21 @@
+[Unit]
+Description=Loopback read-only viewer for Hermes managed desktop screen %i
+Requires=hermes-vm-desktop@%i.service
+After=hermes-vm-desktop@%i.service
+PartOf=hermes-vm-desktop@%i.service
+
+[Service]
+Type=exec
+User=agent
+Group=agent
+Environment=HOME=/home/agent
+UMask=0077
+ExecStart=/usr/local/bin/hermes-vm-screen %i /usr/local/lib/hermes-desktop-vm/view-launch %i
+ExecStartPost=/usr/local/lib/hermes-desktop-vm/ready.py view %i
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=90
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

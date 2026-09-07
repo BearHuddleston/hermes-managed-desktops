@@ -1,0 +1,14 @@
+name: managed-desktops
+version: 0.1.0
+description: Named Linux/KVM work desktops with explicit guest targeting.
+author: BearHuddleston, Hermes Agent
+license: MIT
+# Requires the unpublished generic core profile-resource prerequisite.
+# Do not declare a released Hermes version as satisfying that dependency.
+config_schema:
+  cpus: {type: int, default: 4, description: Virtual CPUs for new VMs.}
+  memory_mib: {type: int, default: 4096, description: Memory for new VMs in MiB.}
+  disk_gib: {type: int, default: 32, description: Disk size for new VMs in GiB.}
+  ready_timeout: {type: int, default: 1200, description: Guest readiness timeout in seconds.}
+  ovmf_code: {type: str, default: "", description: Optional OVMF firmware code path.}
+  ovmf_vars: {type: str, default: "", description: Optional OVMF variables template path.}

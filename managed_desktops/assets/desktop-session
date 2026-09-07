@@ -1,0 +1,62 @@
+#!/bin/bash
+set -euo pipefail
+screen="${1:?screen required}"
+[[ "$screen" =~ ^[12]$ ]] || exit 2
+notify_socket="${2:?notification socket required}"
+export DISPLAY=":$screen" XDG_SESSION_TYPE=x11 XDG_CURRENT_DESKTOP=XFCE
+export XDG_RUNTIME_DIR="/run/hermes-vm-desktop-$screen"
+export XDG_CACHE_HOME="$HOME/.cache/hermes-vm-screen-$screen"
+export XAUTHORITY="$XDG_RUNTIME_DIR/Xauthority"
+export GTK_MODULES=gail:atk-bridge NO_AT_BRIDGE=0
+export CUA_DRIVER_RS_TELEMETRY_ENABLED=0
+mkdir -p "$XDG_CACHE_HOME"
+xauth -f "$XAUTHORITY" add "$DISPLAY" . "$(mcookie)"
+children=()
+cleanup() {
+    rm -f "$XDG_RUNTIME_DIR/environment.json"
+    if ((${#children[@]})); then kill "${children[@]}" 2>/dev/null || true; fi
+    wait || true
+}
+trap cleanup EXIT
+trap 'exit 0' TERM INT
+Xvfb "$DISPLAY" -screen 0 1440x900x24 -auth "$XAUTHORITY" -nolisten tcp -noreset &
+children+=("$!")
+for attempt in {1..100}; do
+    if xdpyinfo >/dev/null 2>&1; then break; fi
+    kill -0 "${children[0]}"
+    sleep 0.1
+done
+xdpyinfo >/dev/null
+# Activation must use this display, not the environment dbus-run-session inherited.
+dbus-update-activation-environment DISPLAY XAUTHORITY XDG_RUNTIME_DIR XDG_CACHE_HOME \
+    GTK_MODULES NO_AT_BRIDGE XDG_SESSION_TYPE XDG_CURRENT_DESKTOP CUA_DRIVER_RS_TELEMETRY_ENABLED
+xfwm4 --compositor=on &
+children+=("$!")
+xfsettingsd --no-daemon &
+children+=("$!")
+xsetroot -solid '#172433'
+xset s off
+xset -dpms || true
+for attempt in {1..100}; do
+    if xprop -root _NET_SUPPORTING_WM_CHECK | /usr/bin/grep -q 'window id'; then break; fi
+    kill -0 "${children[1]}"
+    sleep 0.1
+done
+xprop -root _NET_SUPPORTING_WM_CHECK | /usr/bin/grep -q 'window id'
+# Start this screen's separate AT-SPI bus before any remote application launch.
+dbus-send --session --print-reply --dest=org.a11y.Bus /org/a11y/bus org.a11y.Bus.GetAddress >/dev/null
+python3 - <<'PY'
+import json, os
+from pathlib import Path
+keys = ("DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS",
+        "XDG_CACHE_HOME", "XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "GTK_MODULES", "NO_AT_BRIDGE")
+path = Path(os.environ["XDG_RUNTIME_DIR"]) / "environment.json"
+temporary = path.with_suffix(".tmp")
+temporary.write_text(json.dumps({key: os.environ[key] for key in keys}) + "\n")
+temporary.chmod(0o600)
+temporary.replace(path)
+PY
+NOTIFY_SOCKET="$notify_socket" systemd-notify --ready --status="Desktop screen $screen ready"
+wait -n "${children[@]}"
+# A core child exiting (even successfully) means the desktop is no longer ready.
+exit 1

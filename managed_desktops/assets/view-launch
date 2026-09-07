@@ -1,0 +1,19 @@
+#!/bin/bash
+set -euo pipefail
+screen="${1:?screen required}"
+[[ "$screen" =~ ^[12]$ ]] || exit 2
+children=()
+cleanup() {
+    if ((${#children[@]})); then kill "${children[@]}" 2>/dev/null || true; fi
+    wait || true
+}
+trap cleanup EXIT
+trap 'exit 0' INT TERM
+# This is a viewer, never an additional way to inject desktop input.
+x11vnc -display "$DISPLAY" -auth "$XAUTHORITY" -rfbport "$((5900+screen))" \
+    -listen 127.0.0.1 -localhost -forever -shared -nopw -viewonly -noxdamage -quiet &
+children+=("$!")
+/usr/local/lib/hermes-desktop-vm/view.py "$screen" &
+children+=("$!")
+wait -n "${children[@]}"
+exit 1
