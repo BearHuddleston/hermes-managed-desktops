@@ -51,7 +51,7 @@ live VMs as a side effect of development. Commit/publish only when authorized.
 ## Canonical tests on exact stock Hermes
 
 The pinned compatibility target is unmodified stock Hermes
-`6178e9f4eed8d99f4fc550add939d58c7bed6206`. Keep its checkout **outside this plugin
+`8aa219ef60ae16bd130e4775a1513e122880654e`. Keep its checkout **outside this plugin
 source tree**; nesting it here changes skill/package discovery. No KVM or guest
 image download is needed for the automated suite.
 
@@ -89,8 +89,8 @@ units. Fresh-VM acceptance is separate and requires authorized disposable resour
 
 Build sdist and wheel from sdist in a disposable venv using
 `python -m build --outdir /absolute/path/to/disposable-dist`. Do not install into
-the running Hermes environment. The 0.2.0 source preview is published on
-`feat/independent-vm-lifecycle`; it is not a PyPI or GitHub release. Follow the
+the running Hermes environment. The 0.2.0 source preview is on `main`; there is no
+PyPI publication. Draft GitHub releases are not public downloads. Follow the
 [README installation steps](README.md#install-the-source-preview), record the
 source commit, and verify the built wheel rather than assuming an unqualified
 remote install selects this version.
@@ -102,8 +102,12 @@ Run the CI helper **before installing the wheel** to verify directory discovery:
   --core /absolute/path/to/stock-hermes-checkout --source user
 ```
 
-It verifies the exact clean SHA, creates disposable profiles and external state,
-stages the directory, and enables/configures through the real stock CLI. After
+It verifies the exact clean SHA, runs the official deprecated-import checks while
+the migration tooling exists, creates disposable profiles and external state,
+stages the directory, and enables/configures through the real stock CLI. A missing
+or invalid manifest with the scanner still present fails rather than passing as
+zero hits. If both are retired on a future deliberately selected stock revision,
+the report records the scanner as unavailable and still runs integration. After
 installing the local wheel into that disposable interpreter, run it again with
 `--source entrypoint`. A directory copy and wheel entry point must not compete in
 the directory verification environment. Both runs use neutral working directories
@@ -133,14 +137,28 @@ No autochat binding or tablet viewer is part of this package.
 
 ## CI and releases
 
-`.github/workflows/package.yml` builds distributions and runs the canonical suite,
-directory/wheel discovery and Hermes-free standalone verification on Python
-3.11–3.13 against the exact stock SHA. Triggers are pull requests, pushes to `main`,
-and manual dispatch; feature-branch pushes alone do not start a run. Actions are
-SHA-pinned, repository permissions are read-only, and no package publishing/release
-credentials are used. It starts no VMs and does not replace fresh-VM acceptance.
-Report actual local results and exact-head remote CI honestly; merely writing the
-workflow is not a remote pass.
+`.github/workflows/package.yml` lints Python/workflows, builds distributions and
+runs the canonical suite, compatibility checks, directory/wheel discovery and
+Hermes-free standalone verification on Python 3.11–3.13 against the exact stock
+SHA. The suite promotes Hermes compatibility warnings to errors while the warning
+class exists. Run directory-fixture tests before installing the wheel: entry-point
+discovery otherwise supersedes the staged copies.
+
+Triggers are pull requests, pushes to `main`, manual dispatch and reusable workflow
+calls; feature-branch pushes alone do not start a run. Actions are SHA-pinned and
+CI repository permissions are read-only. Ruff and actionlint are version-pinned;
+the downloaded actionlint archive also has a fixed SHA-256 check.
+
+The separate `release.yml` accepts an explicit matching version tag on `main`,
+reruns the complete CI workflow, then creates a draft experimental GitHub release.
+Only the final job receives `contents: write`; PRs never invoke it. It downloads
+this run's tested Python 3.11 bundle rather than rebuilding under the write token,
+verifies it, and verifies the uploaded bytes and draft fields. Existing tags or
+releases are not overwritten. Public release publication, tag pushes, PyPI,
+signing and auto-merge are not configured. Follow [the release procedure](docs/releasing.md).
+
+Neither workflow starts VMs or replaces fresh-VM acceptance. Report actual local
+results and exact-head remote CI honestly; writing a workflow is not a remote pass.
 
 Keep `plugin.yaml` and `pyproject.toml` package versions aligned and supported Python
 versions explicit. Publish tags, releases or registry packages only as a separately
