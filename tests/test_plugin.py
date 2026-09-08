@@ -64,8 +64,10 @@ def test_callbacks_keep_originating_profile_and_settings(
     for manager, module in registrations:
         package = module.__name__ + (".managed_desktops" if source == "directory" else "")
         vm = importlib.import_module(package + ".vm")
-        monkeypatch.setattr(vm, "list_vms", lambda vm=vm: {
+        state = importlib.import_module(package + ".state")
+        monkeypatch.setattr(vm, "list_vms", lambda vm=vm, state=state: {
             "home": str(get_hermes_home()), "cpus": vm.settings()["cpus"],
+            "profile_scope": str(state.current_profile()),
         })
     for index, (home, cpus) in enumerate(((first, 3), (second, 7), (first, 3))):
         manager, _ = registrations[index % 2]
@@ -73,7 +75,7 @@ def test_callbacks_keep_originating_profile_and_settings(
         with home_scope(isolated_profile):
             assert args.func(args) == 0
             assert get_hermes_home() == isolated_profile
-        assert json.loads(capsys.readouterr().out) == {"home": str(home), "cpus": cpus}
+        assert json.loads(capsys.readouterr().out) == {"home": str(home), "cpus": cpus, "profile_scope": str(home)}
 
 
 @pytest.mark.linux_only
@@ -118,8 +120,9 @@ def test_disable_through_cli_removes_surfaces_not_resources(isolated_profile):
 
     manager, _ = discover(isolated_profile)
     # Opaque owned data, not a running guest: disable must not delete it.
-    from hermes_cli.profile_resources import reserve_resource
-    resource = reserve_resource("managed-desktops", "retained")
+    from managed_desktops import state
+    resource = state.reserve("retained")
+    assert not resource.is_relative_to(isolated_profile)
     sentinel = resource / "sentinel"
     sentinel.write_text("owned data", encoding="utf-8")
     result = subprocess.run(
@@ -134,7 +137,7 @@ def test_disable_through_cli_removes_surfaces_not_resources(isolated_profile):
     assert sentinel.read_text(encoding="utf-8") == "owned data"
 
 
-def test_missing_prerequisite_does_not_break_discovery_or_help(
+def test_stock_discovery_and_help_have_no_vm_side_effects(
     isolated_profile, monkeypatch, capsys,
 ):
     import sys
@@ -151,24 +154,28 @@ def test_missing_prerequisite_does_not_break_discovery_or_help(
     assert "preflight" in capsys.readouterr().out
     assert package + ".vm" not in sys.modules
     assert not (isolated_profile / "managed-resources").exists()
+    from managed_desktops import state
+    assert not state.root().exists()
 
 
 @pytest.mark.linux_only
-def test_resource_cli_fails_closed_without_prerequisite(isolated_profile, monkeypatch, capsys):
+def test_inventory_works_without_any_core_resource_prerequisite(isolated_profile, monkeypatch, capsys):
     import sys
 
     monkeypatch.setitem(sys.modules, "hermes_cli.profile_resources", None)
     manager, _ = discover(isolated_profile)
     args = parsed_command(manager, "list")
-    assert args.func(args) == 1
-    assert "prerequisite" in capsys.readouterr().err
+    assert args.func(args) == 0
+    assert json.loads(capsys.readouterr().out) == []
     assert not (isolated_profile / "managed-resources").exists()
+    from managed_desktops import state
+    assert not state.root().exists()
 
 
 def test_public_context_only_registration_restores_binding_on_exception(
     isolated_profile, tmp_path, monkeypatch,
 ):
-    from managed_desktops import cli, config, register
+    from managed_desktops import cli, config, register, state
     from hermes_constants import get_hermes_home
 
     class PublicContext:
@@ -194,14 +201,16 @@ def test_public_context_only_registration_restores_binding_on_exception(
 
     def fail(_args):
         assert config.settings()["cpus"] == 11
+        assert state.current_profile() == isolated_profile
         raise RuntimeError("callback failed")
 
     monkeypatch.setattr(cli, "_dispatch", fail)
     other = tmp_path / "ambient"
-    with home_scope(other):
+    with home_scope(other), state.profile_scope(other):
         with pytest.raises(RuntimeError, match="callback failed"):
             args.func(args)
         assert get_hermes_home() == other
+        assert state.current_profile() == other
         assert config.settings() == dict(config.DEFAULTS)
 
 
@@ -209,6 +218,7 @@ def test_config_bindings_are_nested_concurrent_and_return_fresh_values(tmp_path)
     from concurrent.futures import ThreadPoolExecutor
     from threading import Barrier
     from managed_desktops.config import DEFAULTS, bind, settings
+    from managed_desktops.state import current_profile
     from hermes_constants import get_hermes_home
 
     barrier = Barrier(2)
@@ -218,25 +228,32 @@ def test_config_bindings_are_nested_concurrent_and_return_fresh_values(tmp_path)
         with bind(home, lambda key, default: cpus if key == "cpus" else default):
             barrier.wait(timeout=5)
             assert get_hermes_home() == home
+            assert current_profile() == home
             assert settings()["cpus"] == cpus
             changed = settings()
             changed["cpus"] = -1
             assert settings()["cpus"] == cpus
             with bind(tmp_path / "nested", lambda key, default: default):
                 assert settings() == dict(DEFAULTS)
+                assert current_profile() == tmp_path / "nested"
             assert settings()["cpus"] == cpus
+            assert current_profile() == home
         assert settings() == dict(DEFAULTS)
+        assert current_profile() is None
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         list(pool.map(worker, (3, 7)))
 
 
 def test_manifest_defaults_match_config_and_skill_is_packaged_once():
+    import tomllib
     import yaml
     from managed_desktops.config import DEFAULTS
 
     root = Path(__file__).resolve().parents[1]
     manifest = yaml.safe_load((root / "plugin.yaml").read_text(encoding="utf-8"))
+    project = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    assert project["version"] == manifest["version"]
     assert {key: entry["default"] for key, entry in manifest["config_schema"].items()} == dict(DEFAULTS)
     skills = list(root.glob("**/SKILL.md"))
     assert skills == [root / "managed_desktops" / "skills" / "managed-agent-desktops" / "SKILL.md"]

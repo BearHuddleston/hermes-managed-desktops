@@ -32,6 +32,7 @@ def isolated_profile(_hermetic_environment, tmp_path, monkeypatch):
     profile = home / "profile"
     monkeypatch.setattr(Path, "home", lambda: home)
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_STATE_HOME", str(home / "external-state"))
     monkeypatch.setenv("HERMES_HOME", str(profile))
     monkeypatch.setenv("HERMES_TEST_ISOLATION", str(profile))
     return stage_plugin(profile)

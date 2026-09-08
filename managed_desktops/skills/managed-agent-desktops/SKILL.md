@@ -1,7 +1,7 @@
 ---
 name: managed-agent-desktops
 description: Operate dedicated Linux virtual desktops for agents.
-version: 1.0.0
+version: 2.0.0
 author: BearHuddleston (BearHuddleston), Hermes Agent
 license: MIT
 platforms: [linux]
@@ -14,125 +14,155 @@ metadata:
 
 # Managed Agent Desktops Skill
 
-Use named Debian VMs for native-app work without operating the user's own desktop.
-The CLI manages Linux/KVM guests, not existing machines or session-bound Desktop viewers.
-Two screens are work areas in one guest, not separate security tenants.
+Use named Debian VMs for native-app work without operating the user's desktop.
+The standalone CLI manages Linux/KVM guests; optional stock-Hermes integration adds
+`hermes desktop-vm`, not a model tool or session-bound Desktop viewer.
 
 ## When to Use
 
-Use for isolated GUI dogfooding, persistent native-app tasks, screenshots and continuous recordings.
-Do not use the normal `computer_use` tool assuming it targets a guest: this feature never retargets it.
+Use for isolated GUI dogfooding, persistent native-app tasks, screenshots and continuous
+recordings. Do not assume normal `computer_use` targets a guest: it is never retargeted.
+Two screens are work areas in one guest, not separate security tenants.
 
 ## Prerequisites
 
 The machine running `terminal` needs Linux x86_64, accessible KVM, a user systemd session,
-QEMU, OVMF, cloud-image-utils and OpenSSH. Run preflight through `terminal`; it reports
-missing dependencies without installing packages or changing the host.
+QEMU, OVMF, cloud-image-utils and OpenSSH. `preflight` diagnoses without installing or
+changing host settings. Profile binding needs stable directory birth time and a compatible
+`stat`; unsupported filesystems fail closed. Do not change scope to evade this refusal.
 
-Enable the standalone `managed-desktops` plugin in the intended Hermes profile.
-It requires the **unpublished generic core profile-resource prerequisite**; stock Hermes
-without `hermes_cli.profile_resources.resource_root` and `reserve_resource` is unsupported.
-There is no official optional-skill install. Load these read-only packaged instructions with
-`skill_view(name="managed-desktops:managed-agent-desktops")`. VM state belongs to that
-profile's `managed-resources/managed-desktops/` directory. Never copy provider keys, real browser profiles, host SSH keys or home directories
-into a guest. Provisioning needs explicit NAT access; NAT can reach the host/LAN as well
-as the internet. This is not a malware-analysis sandbox.
+Use the installed `hermes-managed-desktops` CLI or `python -m managed_desktops`, both
+independent of Hermes. The 0.2.0 source preview is published on
+`feat/independent-vm-lifecycle`, not as a PyPI or GitHub release. Follow the repository
+README to clone that branch and build a wheel; do not assume an unqualified install
+selects 0.2.0. Use Python 3.11–3.13 and keep standalone recovery outside profiles.
+For a directory-only copy, run the module from `<profile home>/plugins/managed-desktops/`
+or set `PYTHONPATH` to that containing directory. Copying does not install a console script.
 
-For unpublished local changes, copy the checkout's `__init__.py`, `plugin.yaml`, `LICENSE` and
-`managed_desktops/` into `<profile home>/plugins/managed-desktops/`, then run
-`hermes plugins enable managed-desktops --no-allow-tool-override` in that profile. `hermes plugins install /path`
-is unsupported; `file://` installs clone committed history, not uncommitted files.
-See the repository README for isolated staging and wheel installation.
+Native integration uses documented stock plugin APIs, with no profile-resource or argv
+patch. Enable in the intended profile and load these read-only instructions with
+`skill_view(name="managed-desktops:managed-agent-desktops")`; there is no official
+optional-skill copy. Native `exec`, `app`, and `cua` refuse operation because stock Hermes
+preprocesses arbitrary guest argv. Use standalone commands for these, not a core workaround.
+Native management/capture/transfers/recording/viewing remain available.
+
+Never copy provider keys, browser profiles, host SSH keys/agents or home directories into
+a guest. NAT provisioning requires explicit acceptance of internet and possible host/LAN
+access. Native plugins have same-UID host privileges; this is not a malware-analysis sandbox.
 
 ## How to Run
 
-Invoke the CLI through `terminal`:
+Through `terminal`, select the intended profile path explicitly on **every** normal agent
+invocation. The profile must exist, belong to the user and have a regular, valid `config.yaml`
+mapping; symlinks, malformed YAML and nonregular configs are refused. Confirm the intended
+profile with the user if it is not known. Never infer global authority from ambient env.
 
-```text
-hermes desktop-vm preflight
-hermes desktop-vm create demo --network nat
-hermes desktop-vm wait demo
-hermes desktop-vm doctor demo
+```bash
+PROFILE_HOME=/absolute/path/to/intended-existing-profile
+hermes-managed-desktops --profile-home "$PROFILE_HOME" preflight
+hermes-managed-desktops --profile-home "$PROFILE_HOME" list
+hermes-managed-desktops --profile-home "$PROFILE_HOME" create demo --network nat
+hermes-managed-desktops --profile-home "$PROFILE_HOME" wait demo
+hermes-managed-desktops --profile-home "$PROFILE_HOME" doctor demo
 ```
 
-Creation is explicit and refuses existing names. Use a unique disposable name for tests;
-never remove or reprovision an existing user VM to make a test pass.
+`--profile-home PATH` must precede the action. Creation refuses existing names; names are
+unique across all profiles in the selected external store. Use a unique disposable name
+for tests, never remove/reprovision an existing user VM to make a test pass.
+
+**On scoped refusal, stop and report. Never retry with `--global`.** Global scope is a
+deliberate operator recovery/management choice requiring explicit user intent, not normal
+agent operation. Both standalone entry points require an explicit scope even for inventory.
 
 ## Quick Reference
 
+Every command below retains the explicit profile scope:
+
 | Command | Purpose |
 |---|---|
-| `hermes desktop-vm list` | This profile's inventory |
-| `hermes desktop-vm status demo` | Process identity and recorded configuration |
-| `hermes desktop-vm start demo` | Idempotent start, retaining recorded network policy |
-| `hermes desktop-vm stop demo` | Orderly shutdown, without force-killing |
-| `hermes desktop-vm start demo --network isolated` | Boot with QEMU restricted networking |
-| `hermes desktop-vm app --screen 2 demo -- mousepad --disable-server` | Launch a guest native app |
-| `hermes desktop-vm cua demo --screen 2 call list_windows '{}'` | Discover windows on the selected guest screen |
-| `hermes desktop-vm cua demo --screen 2 describe click` | Retrieve the installed driver's schema |
-| `hermes desktop-vm capture demo --screen 2` | Save a PNG and full JSON snapshot |
-| `hermes desktop-vm view demo --screen 2` | Hold a local viewer tunnel; Ctrl-C closes it |
-| `hermes desktop-vm record demo --screen 2 start task-demo` | Start continuous recording |
-| `hermes desktop-vm record demo --screen 2 stop` | Finalize the recording |
-| `hermes desktop-vm remove demo --confirm demo` | Explicitly delete a stopped VM |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" status demo` | Process identity and configuration |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" start demo` | Idempotent start, retaining network policy |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" stop demo` | Orderly shutdown, no force-kill |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" start demo --network isolated` | QEMU restricted networking, while stopped |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" app --screen 2 demo -- mousepad --disable-server` | Launch guest app |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" cua demo --screen 2 call list_windows '{}'` | Discover guest windows |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" cua demo --screen 2 describe click` | Installed driver schema |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" capture demo --screen 2` | Save PNG and full JSON snapshot |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" exec --screen 2 demo -- printenv DISPLAY` | Literal guest argv |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" view demo --screen 2` | Loopback viewer tunnel, Ctrl-C closes |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" record demo --screen 2 start task-demo` | Continuous recording |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" record demo --screen 2 stop` | Finalize MP4 |
+| `hermes-managed-desktops --profile-home "$PROFILE_HOME" remove demo --confirm demo` | Delete stopped VM, exact name confirmation |
 
-For `app` and display-scoped `exec`, put `--screen` before the VM name;
-arguments after `--` belong to the guest command. Use `--help` for sizing and timeout flags.
+For `app` and display-scoped `exec`, place `--screen` before NAME. Arguments after `--`
+belong to the guest, including literal `-c`, `-r`, and `--resume`. Use `--help` for sizing
+and timeout flags. `python -m managed_desktops` is equivalent with a usable import path.
 
 ## Procedure
 
-1. Run preflight and inventory. Confirm the VM name, profile and assigned screen.
-   Creation accepts sizing flags; defaults come from
-   `plugins.entries.managed-desktops.settings` in config.yaml, read through PluginContext.
-   For example: `hermes config set plugins.entries.managed-desktops.settings.cpus 6`.
-   Guest Cua defaults to standard permissions. Only use `create --permission-mode unrestricted`
-   when the user explicitly accepts unrestricted input inside that guest.
-2. Create or start the named VM, then run `wait`. Process-active is not desktop-ready.
-   On failure, use `doctor`; never fall back to host desktop automation.
-3. After provisioning, stop and start with `--network isolated` when outbound networking is
-   unnecessary. It disables guest-initiated networking through QEMU while retaining the
-   explicitly forwarded SSH management connection. NAT remains the recorded policy until changed.
-4. Transfer individual files explicitly. Guest paths must be literal absolute file paths.
-   Use the guest workspace (the `agent` user's `workspace` directory); use `exec demo -- pwd`
-   or `exec demo -- printenv HOME` to discover guest paths. Upload/download take NAME SOURCE
-   DESTINATION; neither performs recursive host-home sharing. Download artifacts to a new local path.
-5. Launch a native app on the assigned screen, discover windows, and inspect the current Cua
-   `describe` schemas. Capture a window with both `--pid` and `--window-id` when accessibility
-   and window-specific input are needed. Use `read_file` on the saved JSON and `vision_analyze`
-   on the saved PNG; terminal truncation is not the complete accessibility tree.
+1. Run scoped preflight and inventory. Confirm VM name, profile and assigned screen.
+   Standalone scoped defaults come only from `plugins.entries.managed-desktops.settings`
+   in that profile's `config.yaml`; explicit sizing wins. Native callbacks capture their
+   registering home and read through `ctx.get_config`. No mutable global config is shared.
+   Cua uses standard permissions unless the user explicitly accepts unrestricted guest input.
+2. Create/start the named VM, then `wait`. Process-active is not desktop-ready. On failure,
+   use scoped `doctor`; never fall back to host desktop automation or another scope.
+3. After provisioning, stop and start with `--network isolated` if outbound networking is
+   unnecessary. QEMU `restrict=on` blocks guest-initiated traffic while preserving explicit
+   loopback SSH management forwarding. NAT remains recorded until changed.
+4. Transfer individual files explicitly with scoped `upload NAME SOURCE DESTINATION` and
+   `download NAME SOURCE DESTINATION`. Guest paths are literal absolute paths; use
+   `/home/agent/workspace`. Destinations must be new files, not recursive host-home sharing.
+5. Launch on the assigned screen, discover windows, and inspect Cua `describe` schemas.
+   Capture with both `--pid` and `--window-id` for window-specific access. Use `read_file`
+   on the complete JSON and `vision_analyze` on the PNG; terminal truncation is not the tree.
 6. Use fresh element tokens and the capture's session label. Start with background input;
-   re-capture after uncertain delivery before retrying. Escalate only after a structured
-   refusal or verified no-op, and only on the assigned guest screen. Never type shell/code
-   into an app as a substitute for file transfer and `exec`.
-7. Start a uniquely named continuous recording before the feature workflow. Stop it to
-   finalize MP4; explicitly download the returned guest artifact. Inspect decoded video
-   frames, not only separate screenshots. A reboot ends recording; it cannot record the
-   guest's powered-off interval.
-8. Verify saved files across an orderly stop/start/wait. Fetch artifacts before an explicitly
-   requested removal; removal deletes guest data, keys and locally stored VM captures.
+   re-capture after uncertain delivery. Escalate only after structured refusal or verified
+   no-op, only on the assigned guest screen. Never type shell/code into an app instead of
+   file transfer and scoped `exec`.
+7. Start a unique continuous recording before the workflow. Stop to finalize MP4, explicitly
+   download the returned artifact and inspect decoded frames. Recording survives SSH/app
+   restarts, not guest shutdown; it cannot record powered-off intervals.
+8. Verify files across orderly stop/start/wait. Fetch artifacts before requested removal;
+   removal deletes guest data, keys and locally stored captures. Verify scoped inventory after.
 
 ## Pitfalls
 
 - Both screens share the `agent` account, filesystem and privileges. Do not assign mutually
-  untrusted tenants to different screens or let concurrent workers fight over one screen.
-- A missing VM, SSH host-key mismatch, unavailable screen or stopped Cua daemon is an error,
-  not permission to start another target. The managed CLI does not change host Cua settings.
-- Image bytes and the Cua release are pinned and verified. Debian packages come from signed
-  repositories at provisioning time; the complete guest is not a bit-for-bit frozen image.
-- VM disk overlays depend on their profile's cached Debian backing image. Never move just
-  the overlay, copy a live disk, or delete the backing image while any VM depends on it.
-- There is no autochat/session binding or tablet viewer. The viewer binds only on
-  the machine running the CLI. Do not publish it to LAN, internet or a pre-existing Webapp route as a workaround.
-- Core excludes managed resources from profile clone/export and refuses profile rename/delete
-  while a resource leaf remains, even if this plugin is disabled or removed. Stop and remove
-  each VM explicitly before deleting its profile; uninstalling code does not clean up VMs.
-- A failed bootstrap retains state for diagnostics. Reusing `create` does not silently wipe it.
-- GUI Close and abrupt process termination have different persistence guarantees. Report
-  crash-durability failures separately from orderly-restart results.
+  untrusted tenants or let concurrent workers fight over one screen.
+- Missing VM, stale binding, SSH host-key mismatch, unavailable screen or stopped Cua is an
+  error, not permission to change targets. No host Cua or desktop settings are changed.
+- VM state and shared image cache live in `$XDG_STATE_HOME/hermes-managed-desktops`, or
+  `<OS account home>/.local/state/hermes-managed-desktops`. Fallback uses the Linux
+  account database, not ambient `HOME`; Hermes subprocess HOME isolation does not select
+  another store. Explicit XDG state must be absolute and outside profiles and known Hermes
+  roots. Remember the selected store for recovery; never move only an overlay or delete
+  its backing image.
+- Schema-2 bindings record physical profile directory path/device/inode/birth time outside
+  profiles; there is no clonable token. Clone/import into a new directory, rename, and
+  deletion/recreation do not inherit authority. **In-place restore retaining the directory
+  retains access.** Before repurposing/restoring a slot for a different intended owner, the
+  operator should stop and unbind VMs. Same-UID host users remain the real owners.
+- Stock Hermes allows profile rename/delete, even without this plugin. External VMs survive
+  and may still run; bindings become stale. Disable/uninstall removes discovery, not VMs.
+  New scoped calls refuse; active in-flight operations are not synchronously revoked.
+- Only with explicit user intent may an operator use standalone `--global` to inspect/stop/
+  rebind/unbind/remove retained VMs without Hermes. `bind`/`unbind` need a stopped VM and
+  `--confirm` its exact immutable UUID. Removal still requires the exact NAME. Global creation
+  is unbound and uses package defaults. Never use global as automatic scoped-error recovery.
+- Nonempty legacy 0.1.0 profile-owned resource roots block binding and are left untouched,
+  including legacy imports. Use the old version/harness for cleanup or retain it pending
+  explicit migration; never delete live disks to bypass refusal. No automatic adoption exists.
+- Debian image/Cua bytes are verified and pinned; apt uses signed live repositories, not a
+  fully frozen guest snapshot. Failed bootstrap retains state; create does not silently wipe it.
+- Viewer access is loopback on the CLI host, accessible to local host users. Do not publish
+  it to LAN/internet or a pre-existing Webapp route. No autochat binding or tablet viewer exists.
+- GUI Close and abrupt process termination have different persistence guarantees; report
+  crash-durability separately from orderly-restart results.
 
 ## Verification
 
-Through `terminal`, run `hermes desktop-vm doctor demo` after `wait` and inspect its
-actual guest readiness result. For a provisioner change, additionally demonstrate fresh-VM
+Through `terminal`, run `hermes-managed-desktops --profile-home "$PROFILE_HOME" doctor demo`
+after `wait` and inspect actual readiness. Provisioner changes additionally need fresh-VM
 input/readback, both screens, file round-trip, orderly-restart persistence, decoded recording
-frames, and stopped-target refusal; mocks or an existing-VM smoke test are insufficient.
+frames and stopped-target refusal. Mocks, wheel builds and no-KVM CI do not establish that.
