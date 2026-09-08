@@ -7,10 +7,11 @@ explicitly loaded, read-only skill `managed-desktops:managed-agent-desktops`.
 It adds no model tool, patches no core files, and never retargets normal
 `computer_use`, binds autochat, or provides a tablet viewer.
 
-> **0.2.0 is a published source preview, not a PyPI or GitHub release.** Use
-> [`feat/independent-vm-lifecycle`](https://github.com/BearHuddleston/hermes-managed-desktops/tree/feat/independent-vm-lifecycle)
-> for this version, rather than assuming an unqualified install gets it. The older
-> 0.1.0 implementation requires core prerequisites and has a different storage contract.
+> **0.2.0 is experimental.** Its source is on `main`; there is no PyPI publication.
+> GitHub release preparation creates maintainer-only drafts, not public downloads.
+> Check [Releases](https://github.com/BearHuddleston/hermes-managed-desktops/releases)
+> for published artifacts, or build from source below. The older 0.1.0 implementation
+> requires core prerequisites and has a different storage contract.
 
 Source and issues: [BearHuddleston/hermes-managed-desktops](https://github.com/BearHuddleston/hermes-managed-desktops).
 
@@ -25,7 +26,7 @@ remains usable without profile binding. Imports and help do not probe VM depende
 `preflight` reports missing host dependencies without installing anything.
 
 Native integration uses stock Hermes's documented plugin APIs, verified against
-[`6178e9f4eed8d99f4fc550add939d58c7bed6206`](https://github.com/NousResearch/hermes-agent/tree/6178e9f4eed8d99f4fc550add939d58c7bed6206).
+[`8aa219ef60ae16bd130e4775a1513e122880654e`](https://github.com/NousResearch/hermes-agent/tree/8aa219ef60ae16bd130e4775a1513e122880654e).
 No profile-resource API, lifecycle guard, or core argv patch is required.
 Stock Hermes preprocesses some arguments before plugins receive them. Therefore
 native `exec`, `app`, and `cua` are **refusal-only routes**: use the standalone CLI
@@ -33,6 +34,13 @@ for those commands, including guest `-c`, `-r`, or `--resume` arguments after `-
 Native management, capture, transfers, recording and loopback viewing are supported.
 See the official [plugin contract](https://hermes-agent.nousresearch.com/docs/developer-guide/plugins)
 and [profile guide](https://hermes-agent.nousresearch.com/docs/user-guide/profiles).
+
+The September 14, 2026 import-path migration does not require a runtime change in
+0.2.0. The official compatibility scanner found no deprecated imports, and both
+directory and wheel integration passed against this stock revision. CI repeats
+the scan and treats compatibility warnings as errors while Hermes supplies that
+temporary tooling. Its later removal does not remove the integration tests. See
+the upstream [migration manifest](https://github.com/NousResearch/hermes-agent/blob/main/COMPAT_MANIFEST.md).
 
 ## Install the source preview
 
@@ -45,7 +53,7 @@ instead. Do not use an unsupported system Python just because it is named `pytho
 ```bash
 PLUGIN=/absolute/path/to/new-managed-desktops-checkout
 SANDBOX=/absolute/path/to/new-disposable-artifacts
-git clone --branch feat/independent-vm-lifecycle --single-branch \
+git clone --branch main --single-branch \
   https://github.com/BearHuddleston/hermes-managed-desktops.git "$PLUGIN"
 git -C "$PLUGIN" log -1 --format='%H'
 python3.11 -m venv "$SANDBOX/venv"
@@ -211,11 +219,16 @@ HERMES_PYTHON=/absolute/path/to/test-venv/bin/python \
   scripts/run_tests.sh /absolute/path/to/stock-hermes-checkout --file-retries 0 -q
 ```
 
-The CI workflow builds distributions, runs this suite and verifies directory/wheel
-discovery and Hermes-free standalone use on Python 3.11–3.13 against the exact stock
-SHA above. It runs on pull requests, pushes to `main`, or manual dispatch; a feature
-branch push alone does not trigger it. Check the run for the relevant commit rather
-than treating the workflow definition as a passing result. SHA-pinned actions have
-read-only repository permissions; no release or registry publishing is configured.
-CI does **not** start KVM guests or establish fresh-VM acceptance. That requires
-separately authorized disposable resources.
+The CI workflow lints Python/workflows, builds distributions, runs this suite and
+verifies compatibility, directory/wheel discovery and Hermes-free standalone use
+on Python 3.11–3.13 against the exact stock SHA above. It runs on pull requests,
+pushes to `main`, manual dispatch, or the draft-release workflow; a feature branch
+push alone does not trigger it. Check the run for the relevant commit rather than
+treating the workflow definition as a passing result.
+
+CI has read-only repository permissions. The separate manual release workflow
+reruns CI before granting one job permission to create a **draft prerelease** with
+the tested wheel, sdist, checksums and source provenance. It does not publish that
+draft, upload to PyPI, or overwrite an existing release. See the
+[release procedure](docs/releasing.md). Neither workflow starts KVM guests or
+establishes fresh-VM acceptance; that needs separately authorized resources.

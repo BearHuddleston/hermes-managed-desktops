@@ -5,7 +5,8 @@ The provisioner supports Linux x86_64/KVM and a user systemd session. The
 standalone CLI works without Hermes; optional `hermes desktop-vm` integration
 uses stock native plugin APIs. No core patch or new model tool is required.
 See [0.2.0 source-preview installation](../README.md#install-the-source-preview)
-for the published branch and wheel build. No PyPI or GitHub release is required.
+for the `main` checkout and wheel build. No PyPI or GitHub release is required;
+maintainer-only release drafts are not downloadable installation sources.
 
 ## Choose scope before acting
 
